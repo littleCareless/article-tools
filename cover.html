@@ -6,6 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>封面生成器 · Cover Maker</title>
   <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
+  <!-- Brush font for 国风 templates (graceful serif fallback if offline) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
   <style>
     @font-face {
       font-family: 'Noto Serif SC';
@@ -1051,10 +1055,36 @@
     /* ── Presets strip (inside center, below cover) ── */
     .presets-strip {
       flex: none;
+      position: relative;
       padding: 10px 20px 12px;
       border-top: 1px solid #e5e7eb;
       background: #fff;
     }
+
+    /* Pull-tab on the top border: expand to show every preset (no h-scroll) */
+    .presets-toggle {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 46px;
+      height: 20px;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #9ca3af;
+      z-index: 6;
+      box-shadow: 0 -1px 4px rgba(0, 0, 0, 0.05);
+      transition: color 0.15s, border-color 0.15s;
+    }
+
+    .presets-toggle:hover { color: #2563eb; border-color: #93c5fd; }
+    .presets-toggle svg { transition: transform 0.2s; }
+    .presets-strip.expanded .presets-toggle svg { transform: rotate(180deg); }
 
     .presets-label {
       font-size: 9px;
@@ -1066,14 +1096,48 @@
       margin-bottom: 8px;
     }
 
-    .presets-list {
+    /* Both rows share one horizontal scrollbar */
+    .presets-scroll {
       display: flex;
-      gap: 8px;
+      flex-direction: column;
+      gap: 10px;
       overflow-x: auto;
-      padding-bottom: 2px;
+      padding-bottom: 4px;
       scrollbar-width: thin;
       scrollbar-color: #e5e7eb transparent;
     }
+
+    .presets-scroll::-webkit-scrollbar { height: 6px; }
+    .presets-scroll::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 3px; }
+
+    .presets-row-wrap {
+      display: flex;
+      flex-direction: column;
+      width: max-content;
+    }
+
+    .presets-list {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* Keep each category label pinned at the left while its row scrolls */
+    .presets-row-wrap .presets-label {
+      position: sticky;
+      left: 0;
+    }
+
+    /* Expanded: wrap everything into view, drop the horizontal scrollbar */
+    .presets-strip.expanded .presets-scroll {
+      overflow-x: hidden;
+      overflow-y: auto;
+      max-height: 46vh;
+    }
+    .presets-strip.expanded .presets-row-wrap { width: auto; }
+    .presets-strip.expanded .presets-list { flex-wrap: wrap; }
+
+    /* Sections a 快速预设 (template) controls itself — disabled while one is active */
+    .psec-disabled { opacity: 0.4; pointer-events: none; }
 
     .presets-list::-webkit-scrollbar {
       height: 3px;
@@ -1118,6 +1182,30 @@
       aspect-ratio: 5 / 2;
       border-radius: 3px;
       overflow: hidden;
+    }
+
+    /* ── Template layer (full custom layouts injected into the cover) ── */
+    #tpl-root {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      display: none;
+      overflow: hidden;
+    }
+
+    .cover.tpl-mode > *:not(#tpl-root) { display: none !important; }
+    .cover.tpl-mode::before { content: none; }
+    .cover.tpl-mode #tpl-root { display: block; }
+
+    /* ── In-canvas editing ── */
+    .cover.canvas-editing [contenteditable="true"] { cursor: text; }
+    .cover.canvas-editing [contenteditable="true"]:hover {
+      outline: 1px dashed rgba(120, 120, 120, 0.55);
+      outline-offset: 2px;
+    }
+    .cover.canvas-editing [contenteditable="true"]:focus {
+      outline: 1.5px solid rgba(37, 99, 235, 0.7);
+      outline-offset: 2px;
     }
 
     .thumb-line {
@@ -1309,6 +1397,7 @@
     <span class="header-ratio" id="ratio-label">5:2 · 1200×480</span>
     <div class="header-spacer"></div>
     <div class="header-actions">
+      <button class="btn" id="btn-edit-toggle" onclick="setCanvasEditable(!editOn)">画布编辑：开</button>
       <button class="btn" onclick="resetAll()">重置</button>
       <button class="btn" id="btn-copy-draft" onclick="copyDraftConfig()">Copy Config</button>
       <button class="btn" id="btn-copy-config" onclick="copyConfig()">Copy 预设</button>
@@ -1466,14 +1555,28 @@
             </div>
             <div class="meta"></div>
             <img class="cover-img" id="cover-img" style="display:none" alt="">
+            <div id="tpl-root"></div>
           </div>
         </div>
       </div>
 
       <!-- Presets below canvas -->
-      <div class="presets-strip">
-        <div class="presets-label">快速预设 Presets</div>
-        <div class="presets-list" id="presets-list"></div>
+      <div class="presets-strip" id="presets-strip">
+        <button class="presets-toggle" id="presets-toggle" onclick="togglePresetsExpand()" title="展开 / 收起全部预设" aria-label="展开 / 收起全部预设">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 10l4-4 4 4"/>
+          </svg>
+        </button>
+        <div class="presets-scroll" id="presets-scroll">
+          <div class="presets-row-wrap">
+            <span class="presets-label">快速预设 Templates</span>
+            <div class="presets-list" id="templates-list"></div>
+          </div>
+          <div class="presets-row-wrap">
+            <span class="presets-label">可调预设 Presets</span>
+            <div class="presets-list" id="presets-list"></div>
+          </div>
+        </div>
       </div>
     </main>
 
@@ -1481,7 +1584,7 @@
     <aside class="panel panel-right">
       <div class="panel-body">
 
-        <div class="psec">
+        <div class="psec" id="psec-color">
           <div class="psec-header">
             <span class="psec-title">配色 Color</span>
           </div>
@@ -1542,7 +1645,7 @@
           </div>
         </div>
 
-        <div class="psec">
+        <div class="psec" id="psec-deco">
           <div class="psec-header">
             <span class="psec-title">装饰 Decoration</span>
           </div>
@@ -1978,6 +2081,7 @@
     document.getElementById('color-section').addEventListener('click', e => {
       const btn = e.target.closest('.color-btn[data-scheme]');
       if (!btn) return;
+      clearTemplate();
       document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       applyColorScheme(+btn.dataset.scheme);
@@ -2101,6 +2205,7 @@
     document.getElementById('deco-picker').addEventListener('click', e => {
       const btn = e.target.closest('.deco-btn');
       if (!btn) return;
+      clearTemplate();
       document.querySelectorAll('.deco-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       applyDecoVis(btn.dataset.deco);
@@ -2146,6 +2251,7 @@
       cover.querySelector('h1').textContent = document.getElementById('inp-title').value;
       cover.querySelector('.subtitle').textContent = document.getElementById('inp-subtitle').value;
       cover.querySelector('.meta').textContent = document.getElementById('inp-author').value;
+      renderActiveTemplate();
     }
 
     ['inp-label', 'inp-title', 'inp-subtitle', 'inp-author'].forEach(id => {
@@ -2183,6 +2289,7 @@
       document.getElementById('val-subtitle-lh').textContent = subLH;
       document.getElementById('val-title-mt').textContent = titleMT + ' cqi';
       document.getElementById('val-title-mb').textContent = titleMB + ' cqi';
+      renderActiveTemplate();
     }
 
     ['sld-label', 'sld-title', 'sld-subtitle', 'sld-width',
@@ -2278,6 +2385,7 @@
     }
 
     function applyPreset(idx) {
+      clearTemplate();
       const p = PRESETS[idx];
       document.querySelectorAll('.color-btn').forEach(b => b.classList.toggle('active', +b.dataset.scheme === p.scheme));
       applyColorScheme(p.scheme);
@@ -2348,6 +2456,400 @@
         card.addEventListener('click', () => applyPreset(i));
         list.appendChild(card);
       });
+    }
+
+    // ── Cover templates (full custom layouts) ──────────────────────────────
+    // Each template injects its own HTML into #tpl-root and paints over the
+    // default editable cover. The 4 content fields (label/title/subtitle/author)
+    // feed the template via render(); editing a field re-renders it live.
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    const COVER_TEMPLATES = [
+      {
+        id: 'editorial',
+        name: '杂志大字',
+        style: '极简 / 杂志',
+        bg: '#faf7f0',
+        font: '"Noto Serif SC", serif',
+        // design defaults for every adjustable typography control (字号/行高/间距/宽度)
+        typo: { label: 1.6, title: 5, subtitle: 2.1, titleLH: 1.2, subtitleLH: 1.6, titleMT: 0, titleMB: 2.2, width: 66 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#faf7f0;font-family:'Noto Serif SC',serif;">
+            <div style="position:absolute;top:-7cqi;right:2cqi;font-size:36cqi;font-weight:900;color:rgba(179,64,47,0.06);line-height:1;">01</div>
+            <div style="position:absolute;top:5.2cqi;left:6cqi;right:6cqi;display:flex;justify-content:space-between;align-items:center;font-family:'Noto Sans SC',sans-serif;font-size:${c.labelSize}cqi;letter-spacing:0.32em;text-transform:uppercase;">
+              <span data-edit="label" style="color:#b3402f;font-weight:700;">${esc(c.label)}</span>
+              <span style="color:#a8a197;">封面 / Cover</span>
+            </div>
+            <div style="position:absolute;top:8.8cqi;left:6cqi;right:6cqi;height:1px;background:#d9d3c4;"></div>
+            <div style="position:absolute;left:6cqi;bottom:6cqi;right:6cqi;">
+              <div style="display:flex;align-items:center;gap:1.4cqi;margin-bottom:2cqi;">
+                <span style="width:1.5cqi;height:1.5cqi;background:#b3402f;display:block;"></span>
+                <span data-edit="author" style="font-family:'Noto Sans SC',sans-serif;font-size:1.7cqi;letter-spacing:0.1em;color:#8a8478;">${esc(c.author)}</span>
+              </div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:900;color:#1c1a16;line-height:${c.titleLH};letter-spacing:-0.01em;margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#6c6458;letter-spacing:0.04em;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'minimal', name: '极简留白', style: '极简 / 杂志', bg: '#f7f6f2', font: '"Noto Serif SC", serif',
+        typo: { label: 1.6, title: 4.6, subtitle: 1.95, titleLH: 1.32, subtitleLH: 1.6, titleMT: 0, titleMB: 0, width: 64 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#f7f6f2;font-family:'Noto Serif SC',serif;display:flex;align-items:center;justify-content:center;">
+            <span style="position:absolute;top:4cqi;left:4.5cqi;font-family:'Noto Sans SC',sans-serif;font-weight:300;font-size:2.4cqi;color:#cbc5b6;">+</span>
+            <span style="position:absolute;top:4cqi;right:4.5cqi;font-family:'Noto Sans SC',sans-serif;font-weight:300;font-size:2.4cqi;color:#cbc5b6;">+</span>
+            <span style="position:absolute;bottom:3cqi;left:4.5cqi;font-family:'Noto Sans SC',sans-serif;font-weight:300;font-size:2.4cqi;color:#cbc5b6;">+</span>
+            <span style="position:absolute;bottom:3cqi;right:4.5cqi;font-family:'Noto Sans SC',sans-serif;font-weight:300;font-size:2.4cqi;color:#cbc5b6;">+</span>
+            <div style="text-align:center;padding:0 10cqi;">
+              <div data-edit="label" style="font-family:'Noto Sans SC',sans-serif;font-size:${c.labelSize}cqi;letter-spacing:0.42em;color:#a8a294;text-transform:uppercase;margin-bottom:3cqi;">${esc(c.label)}</div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:700;color:#22201c;line-height:${c.titleLH};letter-spacing:0.02em;margin:${c.titleMT}cqi auto ${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <div style="width:7cqi;height:2px;background:#b3402f;margin:3cqi auto;"></div>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#8b8576;letter-spacing:0.16em;max-width:${c.width}cqi;margin:0 auto;">${esc(c.subtitle)}</p>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'bold', name: '粗黑标题', style: '极简 / 杂志', bg: '#f0efe9', font: '"Noto Sans SC", sans-serif',
+        typo: { label: 1.9, title: 5, subtitle: 2.1, titleLH: 1.1, subtitleLH: 1.5, titleMT: 0, titleMB: 2.4, width: 80 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#f0efe9;font-family:'Noto Sans SC',sans-serif;">
+            <div style="position:absolute;left:0;top:0;bottom:0;width:2.4cqi;background:#e6362a;"></div>
+            <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(20,20,20,0.043) 1px,transparent 1px);background-size:100% 6cqi;pointer-events:none;"></div>
+            <div style="position:absolute;top:5cqi;right:6cqi;font-size:3.4cqi;font-weight:900;color:rgba(20,20,20,0.42);line-height:1;">01 / 12</div>
+            <div style="position:absolute;left:7.5cqi;top:50%;transform:translateY(-50%);right:6cqi;">
+              <div data-edit="label" style="font-size:${c.labelSize}cqi;font-weight:900;letter-spacing:0.18em;text-transform:uppercase;color:#e6362a;margin-bottom:2cqi;">${esc(c.label)}</div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:900;color:#141414;line-height:${c.titleLH};letter-spacing:-0.01em;margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};font-weight:400;color:#555;letter-spacing:0.02em;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+            <div data-edit="author" style="position:absolute;bottom:4cqi;right:6cqi;font-family:'JetBrains Mono',monospace;font-size:1.5cqi;color:#9a948a;">${esc(c.author)}</div>
+          </div>`
+      },
+
+      {
+        id: 'terminal', name: '终端窗口', style: '科技 / AI', bg: '#0a0e14', font: '"JetBrains Mono", monospace',
+        typo: { label: 2, title: 5, subtitle: 1.95, titleLH: 1.18, subtitleLH: 1.5, titleMT: 0, titleMB: 2.4, width: 80 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#0a0e14;font-family:'JetBrains Mono',monospace;">
+            <div style="position:absolute;inset:0;background:repeating-linear-gradient(transparent 0,transparent 3px,rgba(120,200,255,0.024) 3px,rgba(120,200,255,0.024) 4px);pointer-events:none;"></div>
+            <div style="position:absolute;top:3cqi;left:3cqi;width:3cqi;height:3cqi;border-left:1.5px solid rgba(45,212,191,0.6);border-top:1.5px solid rgba(45,212,191,0.6);"></div>
+            <div style="position:absolute;top:3cqi;right:3cqi;width:3cqi;height:3cqi;border-right:1.5px solid rgba(45,212,191,0.6);border-top:1.5px solid rgba(45,212,191,0.6);"></div>
+            <div style="position:absolute;bottom:3cqi;left:3cqi;width:3cqi;height:3cqi;border-left:1.5px solid rgba(45,212,191,0.6);border-bottom:1.5px solid rgba(45,212,191,0.6);"></div>
+            <div style="position:absolute;bottom:3cqi;right:3cqi;width:3cqi;height:3cqi;border-right:1.5px solid rgba(45,212,191,0.6);border-bottom:1.5px solid rgba(45,212,191,0.6);"></div>
+            <div data-edit="author" style="position:absolute;top:5cqi;right:6cqi;font-size:1.6cqi;color:#3a4658;">${esc(c.author)}</div>
+            <div style="position:absolute;left:6cqi;top:50%;transform:translateY(-50%);right:6cqi;">
+              <div data-edit="label" style="font-size:${c.labelSize}cqi;color:#3ddc84;margin-bottom:2.4cqi;">${esc(c.label)}</div>
+              <h1 style="font-size:${c.titleSize}cqi;font-weight:700;color:#eef3f8;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;display:flex;align-items:flex-end;gap:0.6cqi;"><span data-edit="title">${esc(c.title)}</span><span style="display:inline-block;width:1.1cqi;height:${(c.titleSize * 0.85).toFixed(2)}cqi;background:#3ddc84;"></span></h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#5a6b7a;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+              <div style="display:flex;gap:1.4cqi;margin-top:3cqi;font-size:1.5cqi;color:#2dd4bf;">
+                <span style="border:1px solid #1e3a3a;padding:0.5cqi 1.2cqi;border-radius:3px;">zero-deps</span>
+                <span style="border:1px solid #1e3a3a;padding:0.5cqi 1.2cqi;border-radius:3px;">local-first</span>
+                <span style="border:1px solid #1e3a3a;padding:0.5cqi 1.2cqi;border-radius:3px;">open-source</span>
+              </div>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'ai-light', name: '科技蓝图', style: '科技 / AI', bg: '#eef2fb', font: '"Noto Sans SC", sans-serif',
+        typo: { label: 1.6, title: 5, subtitle: 2, titleLH: 1.16, subtitleLH: 1.5, titleMT: 0, titleMB: 2, width: 50 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#eef2fb;font-family:'Noto Sans SC',sans-serif;">
+            <div style="position:absolute;inset:0;background-image:radial-gradient(rgba(29,78,216,0.1) 1px,transparent 1.4px);background-size:3.4cqi 3.4cqi;"></div>
+            <div style="position:absolute;right:9cqi;top:50%;transform:translateY(-50%);width:26cqi;height:26cqi;">
+              <div style="position:absolute;inset:0;border:1.5px solid #d2dcf6;border-radius:50%;"></div>
+              <div style="position:absolute;inset:5.5cqi;border:1.5px solid #dde5fa;border-radius:50%;"></div>
+              <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:3.4cqi;height:3.4cqi;border-radius:50%;background:#1d4ed8;box-shadow:0 4px 14px rgba(29,78,216,0.4);"></div>
+              <div style="position:absolute;top:-0.9cqi;left:50%;transform:translateX(-50%);width:1.8cqi;height:1.8cqi;border-radius:50%;background:#1d4ed8;"></div>
+              <div style="position:absolute;top:50%;right:-0.7cqi;transform:translateY(-50%);width:1.4cqi;height:1.4cqi;border-radius:50%;background:#60a5fa;"></div>
+              <div style="position:absolute;bottom:4.6cqi;left:4.6cqi;width:1.2cqi;height:1.2cqi;border-radius:50%;background:#93b4f7;"></div>
+            </div>
+            <div data-edit="author" style="position:absolute;top:5cqi;right:6cqi;font-family:'JetBrains Mono',monospace;font-size:1.5cqi;color:#9aa6c0;">${esc(c.author)}</div>
+            <div style="position:absolute;left:6.5cqi;top:50%;transform:translateY(-50%);max-width:54cqi;">
+              <span style="display:inline-flex;align-items:center;gap:0.8cqi;font-size:${c.labelSize}cqi;letter-spacing:0.16em;color:#1d4ed8;background:#fff;border:1px solid #d6def5;padding:0.5cqi 1.4cqi;border-radius:999px;margin-bottom:2.4cqi;"><span style="width:0.9cqi;height:0.9cqi;border-radius:50%;background:#1d4ed8;display:block;"></span><span data-edit="label">${esc(c.label)}</span></span>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:800;color:#111827;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <div style="width:7cqi;height:2.5px;background:#1d4ed8;margin-bottom:2cqi;"></div>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#5b6678;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'blueprint', name: '蓝图暗', style: '科技 / AI', bg: '#0c1622', font: '"Noto Sans SC", sans-serif',
+        typo: { label: 1.6, title: 5, subtitle: 1.9, titleLH: 1.12, subtitleLH: 1.5, titleMT: 0, titleMB: 2.4, width: 54 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#0c1622;font-family:'Noto Sans SC',sans-serif;">
+            <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(56,189,248,0.08) 1px,transparent 1px),linear-gradient(90deg,rgba(56,189,248,0.08) 1px,transparent 1px);background-size:4cqi 4cqi;"></div>
+            <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(56,189,248,0.14) 1px,transparent 1px),linear-gradient(90deg,rgba(56,189,248,0.14) 1px,transparent 1px);background-size:20cqi 20cqi;"></div>
+            <div style="position:absolute;top:3cqi;left:4cqi;font-family:'JetBrains Mono',monospace;font-size:1.3cqi;color:#3a5568;letter-spacing:0.1em;">X:0 Y:0</div>
+            <div style="position:absolute;bottom:3cqi;right:4cqi;font-family:'JetBrains Mono',monospace;font-size:1.3cqi;color:#3a5568;">1200 × 480</div>
+            <div style="position:absolute;right:9cqi;top:50%;transform:translateY(-50%);width:22cqi;height:22cqi;">
+              <div style="position:absolute;inset:0;border:1px solid rgba(56,189,248,0.5);border-radius:50%;"></div>
+              <div style="position:absolute;inset:4cqi;border:1px solid rgba(56,189,248,0.3);border-radius:50%;"></div>
+              <div style="position:absolute;top:50%;left:-3cqi;right:-3cqi;height:1px;background:rgba(56,189,248,0.5);"></div>
+              <div style="position:absolute;left:50%;top:-3cqi;bottom:-3cqi;width:1px;background:rgba(56,189,248,0.5);"></div>
+              <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:1.4cqi;height:1.4cqi;border-radius:50%;background:#38bdf8;"></div>
+            </div>
+            <div style="position:absolute;left:6cqi;top:50%;transform:translateY(-50%);right:30cqi;">
+              <div data-edit="label" style="font-family:'JetBrains Mono',monospace;font-size:${c.labelSize}cqi;letter-spacing:0.22em;color:#38bdf8;margin-bottom:2cqi;">${esc(c.label)}</div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:800;color:#eaf2fb;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#7d93a8;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'ink-landscape', name: '青绿山水', style: '国风 / 水墨', bg: 'linear-gradient(#1a625a 0%,#2c8a78 100%)', font: '"Noto Serif SC", serif',
+        typo: { label: 2.8, title: 5, subtitle: 2, titleLH: 1.16, subtitleLH: 1.5, titleMT: 0, titleMB: 2, width: 56 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:linear-gradient(#1a625a 0%,#2c8a78 100%);font-family:'Noto Serif SC',serif;">
+            <div style="position:absolute;right:14cqi;top:7cqi;width:11cqi;height:11cqi;border-radius:50%;background:radial-gradient(circle,#f0d27e,#e0b85a);box-shadow:0 0 6cqi rgba(240,210,126,0.5);"></div>
+            <div style="position:absolute;left:-14cqi;bottom:-30cqi;width:90cqi;height:54cqi;border-radius:50%;background:#0f4a44;"></div>
+            <div style="position:absolute;right:-18cqi;bottom:-26cqi;width:80cqi;height:46cqi;border-radius:50%;background:#0a3a35;"></div>
+            <div style="position:absolute;right:6cqi;bottom:-30cqi;width:50cqi;height:40cqi;border-radius:50%;background:#13564e;"></div>
+            <div style="position:absolute;inset:3cqi;border:1px solid rgba(240,210,126,0.45);pointer-events:none;"></div>
+            <div style="position:absolute;left:7cqi;top:50%;transform:translateY(-50%);z-index:1;max-width:58cqi;">
+              <div data-edit="label" style="font-family:'Ma Shan Zheng',cursive;font-size:${c.labelSize}cqi;color:#f0d89a;margin-bottom:1.4cqi;">${esc(c.label)}</div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:900;color:#f5efdc;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:rgba(245,239,220,0.82);letter-spacing:0.08em;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'ink-seal', name: '水墨印章', style: '国风 / 水墨', bg: '#f2ebda', font: '"Noto Serif SC", serif',
+        typo: { label: 2.6, title: 5, subtitle: 2, titleLH: 1.18, subtitleLH: 1.5, titleMT: 0, titleMB: 2, width: 56 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#f2ebda;font-family:'Noto Serif SC',serif;">
+            <div style="position:absolute;inset:0;background:radial-gradient(circle at 75% 30%,rgba(0,0,0,0.02),transparent 55%);"></div>
+            <div style="position:absolute;left:9cqi;top:8cqi;bottom:8cqi;width:2px;background:#b3261b;"></div>
+            <div style="position:absolute;left:12.5cqi;top:50%;transform:translateY(-50%);max-width:56cqi;">
+              <div data-edit="label" style="font-family:'Ma Shan Zheng',cursive;font-size:${c.labelSize}cqi;color:#b3261b;margin-bottom:1.6cqi;">${esc(c.label)}</div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:900;color:#2a241a;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#6b6051;letter-spacing:0.12em;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+            <div style="position:absolute;right:9cqi;bottom:7cqi;width:7cqi;height:7cqi;background:#b3261b;border-radius:3px;display:flex;align-items:center;justify-content:center;writing-mode:vertical-rl;font-family:'Ma Shan Zheng',cursive;color:#fff;font-size:2.2cqi;letter-spacing:0.15cqi;transform:rotate(-3deg);box-shadow:0 3px 10px rgba(179,38,27,0.3);">烁皓制</div>
+          </div>`
+      },
+
+      {
+        id: 'finance', name: '商务财经', style: '商务 / 财经', bg: '#0d1b2a', font: '"Noto Serif SC", serif',
+        typo: { label: 1.55, title: 5, subtitle: 2, titleLH: 1.2, subtitleLH: 1.5, titleMT: 0, titleMB: 0, width: 62 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#0d1b2a;font-family:'Noto Serif SC',serif;">
+            <div style="position:absolute;top:5cqi;left:6cqi;right:6cqi;display:flex;justify-content:space-between;font-family:'Noto Sans SC',sans-serif;font-size:${c.labelSize}cqi;letter-spacing:0.3em;color:#c8a45c;text-transform:uppercase;">
+              <span data-edit="label">${esc(c.label)}</span><span data-edit="author" style="color:#7d8896;">${esc(c.author)}</span>
+            </div>
+            <div style="position:absolute;top:8.2cqi;left:6cqi;right:6cqi;height:1px;background:rgba(200,164,92,0.4);"></div>
+            <div style="position:absolute;bottom:8.2cqi;left:6cqi;right:6cqi;height:1px;background:rgba(200,164,92,0.25);"></div>
+            <div style="position:absolute;bottom:4.6cqi;left:6cqi;right:6cqi;display:flex;justify-content:space-between;font-family:'Noto Sans SC',sans-serif;font-size:1.5cqi;letter-spacing:0.2em;color:#7d8896;">
+              <span>零依赖 · 纯本地 · 完全开源</span><span>01 / 12</span>
+            </div>
+            <div style="position:absolute;left:6cqi;top:50%;transform:translateY(-50%);max-width:62cqi;">
+              <div style="width:5cqi;height:2px;background:#c8a45c;margin-bottom:2.2cqi;"></div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:700;color:#f3ecdd;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#a9b4c2;margin-top:2cqi;letter-spacing:0.05em;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+            <div style="position:absolute;right:7cqi;top:50%;transform:translateY(-50%);display:flex;gap:1cqi;align-items:flex-end;height:18cqi;opacity:0.55;">
+              <span style="display:block;width:0.9cqi;height:40%;background:#c8a45c;"></span>
+              <span style="display:block;width:0.9cqi;height:65%;background:#c8a45c;"></span>
+              <span style="display:block;width:0.9cqi;height:50%;background:#c8a45c;"></span>
+              <span style="display:block;width:0.9cqi;height:85%;background:#c8a45c;"></span>
+              <span style="display:block;width:0.9cqi;height:70%;background:#c8a45c;"></span>
+              <span style="display:block;width:0.9cqi;height:100%;background:#c8a45c;"></span>
+              <span style="display:block;width:0.9cqi;height:58%;background:#c8a45c;"></span>
+            </div>
+          </div>`
+      },
+
+      {
+        id: 'weekly', name: '周刊头条', style: '商务 / 财经', bg: '#ffffff', font: '"Noto Serif SC", serif',
+        typo: { label: 2.2, title: 5, subtitle: 2, titleLH: 1.18, subtitleLH: 1.5, titleMT: 0, titleMB: 0, width: 80 },
+        render: c => `
+          <div style="position:absolute;inset:0;background:#fff;font-family:'Noto Serif SC',serif;">
+            <div style="position:absolute;top:0;left:0;right:0;height:1.2cqi;background:#16365c;"></div>
+            <div style="position:absolute;top:5cqi;left:6cqi;right:6cqi;display:flex;justify-content:space-between;align-items:baseline;">
+              <span data-edit="label" style="font-weight:900;font-size:${c.labelSize}cqi;color:#16365c;letter-spacing:0.02em;">${esc(c.label)}</span>
+              <span data-edit="author" style="font-family:'Noto Sans SC',sans-serif;font-size:1.5cqi;letter-spacing:0.22em;color:#8a8a8a;text-transform:uppercase;">${esc(c.author)}</span>
+            </div>
+            <div style="position:absolute;top:8.4cqi;left:6cqi;right:6cqi;height:2px;background:#16365c;"></div>
+            <div style="position:absolute;left:6cqi;top:50%;transform:translateY(-50%);right:6cqi;">
+              <div style="display:flex;align-items:center;gap:1.4cqi;margin-bottom:2cqi;font-family:'Noto Sans SC',sans-serif;">
+                <span style="background:#c0392b;color:#fff;font-size:1.5cqi;font-weight:700;padding:0.4cqi 1.2cqi;letter-spacing:0.12em;">头条</span>
+                <span style="font-size:1.6cqi;color:#888;letter-spacing:0.1em;">TOOLS / 工具</span>
+              </div>
+              <h1 data-edit="title" style="font-size:${c.titleSize}cqi;font-weight:800;color:#141414;line-height:${c.titleLH};margin-top:${c.titleMT}cqi;margin-bottom:${c.titleMB}cqi;max-width:${c.width}cqi;">${esc(c.title)}</h1>
+              <p data-edit="subtitle" style="font-size:${c.subtitleSize}cqi;line-height:${c.subtitleLH};color:#4a4a4a;margin-top:2cqi;border-left:3px solid #16365c;padding-left:1.6cqi;max-width:${c.width}cqi;">${esc(c.subtitle)}</p>
+            </div>
+            <div style="position:absolute;bottom:4.6cqi;left:6cqi;right:6cqi;height:1px;background:#e2e2e2;"></div>
+          </div>`
+      },
+    ];
+
+    let activeTemplate = null;
+    let editOn = true;
+
+    function getCurrentContent() {
+      const n = id => +document.getElementById(id).value;
+      return {
+        label: document.getElementById('inp-label').value,
+        title: document.getElementById('inp-title').value,
+        subtitle: document.getElementById('inp-subtitle').value,
+        author: document.getElementById('inp-author').value,
+        labelSize: n('sld-label'),
+        titleSize: n('sld-title'),
+        subtitleSize: n('sld-subtitle'),
+        titleLH: n('sld-title-lh'),
+        subtitleLH: n('sld-subtitle-lh'),
+        titleMT: n('sld-title-mt'),
+        titleMB: n('sld-title-mb'),
+        width: n('sld-width'),
+      };
+    }
+
+    // Merge content with typography, falling back to the template's own design
+    // defaults (used for thumbnails where slider values aren't relevant).
+    function templateContent(tpl, base) {
+      const t = tpl.typo || {};
+      const pick = (v, d) => (v != null ? v : d);
+      return {
+        label: base.label, title: base.title, subtitle: base.subtitle, author: base.author,
+        labelSize: pick(base.labelSize, t.label),
+        titleSize: pick(base.titleSize, t.title),
+        subtitleSize: pick(base.subtitleSize, t.subtitle),
+        titleLH: pick(base.titleLH, t.titleLH),
+        subtitleLH: pick(base.subtitleLH, t.subtitleLH),
+        titleMT: pick(base.titleMT, t.titleMT),
+        titleMB: pick(base.titleMB, t.titleMB),
+        width: pick(base.width, t.width),
+      };
+    }
+
+    function renderActiveTemplate() {
+      if (!activeTemplate) return;
+      const c = templateContent(activeTemplate, getCurrentContent());
+      document.getElementById('tpl-root').innerHTML = activeTemplate.render(c);
+      applyCanvasEditable(); // re-apply contenteditable to the fresh template nodes
+    }
+
+    // A 快速预设 (template) defines its own colours + decoration, so those two
+    // right-panel sections are locked while a template is active.
+    function setTemplatePanelsDisabled(disabled) {
+      ['psec-color', 'psec-deco'].forEach(id => {
+        document.getElementById(id).classList.toggle('psec-disabled', disabled);
+      });
+    }
+
+    function clearTemplate() {
+      if (!activeTemplate) return;
+      activeTemplate = null;
+      document.getElementById('cover-main').classList.remove('tpl-mode');
+      document.getElementById('tpl-root').innerHTML = '';
+      setTemplatePanelsDisabled(false);
+    }
+
+    function applyTemplate(tpl, cardEl) {
+      activeTemplate = tpl;
+      document.getElementById('cover-main').classList.add('tpl-mode');
+      setTemplatePanelsDisabled(true);
+      // Seed every typography slider with this template's design defaults so the
+      // left panel reflects the template and the user can adjust 字号/行高/间距/宽度 live.
+      if (tpl.typo) {
+        const setSld = (id, v) => { if (v != null) document.getElementById(id).value = v; };
+        setSld('sld-label', tpl.typo.label);
+        setSld('sld-title', tpl.typo.title);
+        setSld('sld-subtitle', tpl.typo.subtitle);
+        setSld('sld-title-lh', tpl.typo.titleLH);
+        setSld('sld-subtitle-lh', tpl.typo.subtitleLH);
+        setSld('sld-title-mt', tpl.typo.titleMT);
+        setSld('sld-title-mb', tpl.typo.titleMB);
+        setSld('sld-width', tpl.typo.width);
+        syncAllSliders();
+      }
+      renderActiveTemplate();
+      document.querySelectorAll('.preset-card').forEach(c => c.classList.remove('active'));
+      if (cardEl) cardEl.classList.add('active');
+    }
+
+    // ── In-canvas editing (click the cover to edit text directly) ──────────
+    const EDIT_FIELD_MAP = { label: 'inp-label', title: 'inp-title', subtitle: 'inp-subtitle', author: 'inp-author' };
+
+    function editableEls() {
+      const cover = document.getElementById('cover-main');
+      const def = [
+        cover.querySelector('.cover-content .label'),
+        cover.querySelector('.cover-content h1'),
+        cover.querySelector('.cover-content .subtitle'),
+        cover.querySelector('.meta'),
+      ];
+      const tpl = [...document.querySelectorAll('#tpl-root [data-edit]')];
+      return [...def, ...tpl].filter(Boolean);
+    }
+
+    function applyCanvasEditable() {
+      document.getElementById('cover-main').classList.toggle('canvas-editing', editOn);
+      editableEls().forEach(el => { el.contentEditable = editOn ? 'true' : 'false'; });
+    }
+
+    function setCanvasEditable(on) {
+      editOn = on;
+      applyCanvasEditable();
+      const btn = document.getElementById('btn-edit-toggle');
+      if (btn) {
+        btn.classList.toggle('btn-primary', on);
+        btn.textContent = on ? '画布编辑：开' : '画布编辑：关';
+      }
+    }
+
+    function editFieldOf(el) {
+      if (el.dataset && el.dataset.edit) return el.dataset.edit;
+      if (el.classList.contains('label')) return 'label';
+      if (el.tagName === 'H1') return 'title';
+      if (el.classList.contains('subtitle')) return 'subtitle';
+      if (el.classList.contains('meta')) return 'author';
+      return null;
+    }
+
+    // Canvas edits flow back to the left-panel inputs silently — no re-render,
+    // so the caret is preserved while typing on the cover.
+    document.getElementById('cover-main').addEventListener('input', e => {
+      const el = e.target;
+      if (!el.isContentEditable) return;
+      const field = editFieldOf(el);
+      if (!field) return;
+      const inp = document.getElementById(EDIT_FIELD_MAP[field]);
+      if (inp) inp.value = el.textContent;
+    });
+
+    function initTemplates() {
+      const list = document.getElementById('templates-list');
+      COVER_TEMPLATES.forEach(tpl => {
+        const card = document.createElement('button');
+        card.className = 'preset-card tpl-card';
+        card.dataset.tpl = tpl.id;
+        const thumb = document.createElement('div');
+        thumb.className = 'preset-thumb';
+        thumb.style.containerType = 'inline-size';
+        thumb.style.background = tpl.bg;
+        thumb.innerHTML = tpl.render(templateContent(tpl, DEFAULT));
+        const info = document.createElement('div'); info.className = 'preset-info';
+        const name = document.createElement('span'); name.className = 'preset-name'; name.textContent = tpl.name;
+        const tags = document.createElement('span'); tags.className = 'preset-tags'; tags.textContent = tpl.style;
+        card.title = tpl.name + ' · ' + tpl.style;
+        info.append(name, tags);
+        card.append(thumb, info);
+        card.addEventListener('click', () => applyTemplate(tpl, card));
+        list.appendChild(card);
+      });
+    }
+
+    function togglePresetsExpand() {
+      document.getElementById('presets-strip').classList.toggle('expanded');
     }
 
     function normalizeHex(hex) {
@@ -2540,6 +3042,7 @@
 
     // ── Reset ──────────────────────────────────────────────────────────────
     function resetAll() {
+      clearTemplate();
       document.getElementById('inp-label').value = DEFAULT.label;
       document.getElementById('inp-title').value = DEFAULT.title;
       document.getElementById('inp-subtitle').value = DEFAULT.subtitle;
@@ -2707,6 +3210,7 @@
       syncAllSliders();
       initSourcePanel();
       initPresets();
+      initTemplates();
       applyPreset(0);
 
       if (meta) {
@@ -2775,6 +3279,8 @@
 
         syncContent();
       }
+
+      setCanvasEditable(true); // main canvas is editable by default
     })();
   </script>
 </body>
