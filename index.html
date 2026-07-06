@@ -305,10 +305,6 @@
     }
 
     .support-item {
-      background: #fff;
-      border: 1px solid #f3eadb;
-      border-radius: 16px;
-      padding: 18px;
       text-align: center;
     }
 
@@ -480,10 +476,9 @@
   <section class="support">
     <div class="support-card">
       <h2 class="support-title">烁皓 AI 交流群</h2>
-      <p class="support-desc">我是烁皓，一个天天用 AI 做产品、搞钱的独立开发者，建了一个「付费 AI 交流群」。<br>💰 入群早鸟价 ￥9.9，群每满 10 人涨 10 元：9.9 → 19.9 → 29.9…… 封顶 99，越早进越便宜。<br>想进的 👉 加我微信 <strong>hao_dev</strong>（备注「入群」），我拉你进群。</p>
+      <p class="support-desc">我是烁皓，一个天天用 AI 做产品、搞钱的独立开发者，建了一个「付费 AI 交流群」。<br>💰 入群早鸟价 ￥9.9，群每满 10 人涨 10 元：9.9 → 19.9 → 29.9…… 封顶 99，越早进越便宜。<br>想进的 👉 加我微信 <button class="grp-wx" type="button" onclick="grpCopyWx()" title="点击复制 hao_dev">hao_dev</button>（备注「入群」），我拉你进群。</p>
       <div class="support-grid">
         <div class="support-item">
-          <h3>微信：hao_dev</h3>
           <img src="images/wechat-qr.png" alt="烁皓微信二维码">
         </div>
       </div>
@@ -531,6 +526,56 @@
         }
       });
     })();
+  </script>
+
+  <!-- ── hao_dev 点击复制 + toast（与工具页弹窗一致） ── -->
+  <style>
+    .grp-wx {
+      font: inherit; font-weight: 700; color: #111;
+      background: none; border: none; padding: 0 1px; margin: 0; cursor: pointer;
+      border-bottom: 1px dashed #9aa0a6;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .grp-wx:hover { color: #d1490b; border-bottom-color: #d1490b; }
+    .grp-toast {
+      position: fixed; left: 50%; top: 24px;
+      transform: translateX(-50%) translateY(-12px);
+      z-index: 10000; pointer-events: none;
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #16a34a; color: #fff;
+      font-size: 13px; font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      padding: 10px 18px; border-radius: 999px;
+      box-shadow: 0 8px 24px rgba(22,163,74,0.35);
+      opacity: 0; transition: opacity 0.2s, transform 0.2s;
+    }
+    .grp-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+
+  <div class="grp-toast" id="grp-toast">复制成功 ✓</div>
+
+  <script>
+    function grpCopyWx() {
+      const done = () => grpToast('复制成功 ✓');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText('hao_dev').then(done).catch(() => grpFallbackCopy('hao_dev', done));
+      } else { grpFallbackCopy('hao_dev', done); }
+    }
+    function grpFallbackCopy(text, cb) {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); cb(); } catch (_) {}
+      document.body.removeChild(ta);
+    }
+    function grpToast(msg) {
+      const t = document.getElementById('grp-toast');
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => t.classList.remove('show'), 1600);
+    }
   </script>
 
 </body>
